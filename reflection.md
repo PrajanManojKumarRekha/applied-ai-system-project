@@ -4,13 +4,38 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+From the README scenario, PawPal+ should help a busy owner keep up with pet care tasks each day.
+
+The three core user actions are:
+- Add and update pet and owner information.
+- Add and edit care tasks like walks, feeding, meds, enrichment, and grooming.
+- Generate and view a daily plan that explains why tasks were chosen.
+
+To support these actions, I drafted four main classes.
+
+Owner
+- Attributes: name, daily time available, preferred task types.
+- Methods: add_pet(), add_task(), set_time_limit().
+
+Pet
+- Attributes: name, species, care notes.
+- Methods: update_notes().
+
+Task
+- Attributes: title, category, duration_minutes, priority, required.
+- Methods: mark_done(), fits_in(remaining_minutes).
+
+Scheduler
+- Attributes: time_limit_minutes.
+- Methods: score_task(task), build_plan(owner), explain_plan(plan).
+
+I also added a PlanItem object in the code skeleton to hold one scheduled item with start time, end time, and reason. This keeps the plan output clean.
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+I reviewed my skeleton and noticed one missing relationship. The plan output needed its own structure, so I added PlanItem to connect a selected task with a time range and reason text.
+
+I also kept scoring in Scheduler and did not split it into too many small classes yet. This avoids extra complexity at this stage and keeps the starter code easy to follow.
 
 ---
 
