@@ -43,8 +43,9 @@ I also kept scoring in Scheduler and did not split it into too many small classe
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+My scheduler focuses on time, completion status, recurring frequency, and exact time conflicts. Time matters because the owner needs a clear order for the day. Completion status matters so the app can separate what is done and what is still pending. Frequency matters because daily and weekly tasks should keep repeating. Conflicts matter because two tasks at the same time can create stress for the owner.
+
+I treated time ordering and completion status as the most important constraints first. Those two parts make the app useful right away. Then I added recurrence and conflict warnings to improve planning quality.
 
 **b. Tradeoffs**
 
@@ -58,13 +59,15 @@ This is reasonable for this project stage because it keeps the logic simple, fas
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+I used Copilot most for planning and for fast code refinement. It helped me brainstorm class design, add scheduler methods, and draft tests. It was also useful for small refactors when I wanted cleaner method structure.
+
+The most helpful prompts were specific ones like asking how to sort HH:MM times with a key function, how to use timedelta for recurring tasks, and how to design lightweight conflict detection.
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+One time I rejected a more complex conflict detection idea that tried to model duration overlaps and advanced scheduling rules. I kept a simpler exact time match strategy because it fit the project scope better.
+
+I verified each change by running python main.py and python -m pytest, then checking if the outputs matched expected behavior.
 
 ---
 
@@ -72,13 +75,15 @@ This is reasonable for this project stage because it keeps the logic simple, fas
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+I tested task completion state changes, adding tasks to pets, sorting order, filtering by pet and status, recurring task creation for daily tasks, conflict warnings for same time tasks, and the edge case of a pet with no tasks.
+
+These tests are important because they cover both the main workflow and edge cases that can break user trust if not handled well.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+My confidence level is 4 out of 5 based on passing automated tests and manual demo runs.
+
+If I had more time, I would test overlapping duration conflicts, invalid time formats from user input, and very large numbers of tasks across many pets.
 
 ---
 
@@ -86,12 +91,12 @@ This is reasonable for this project stage because it keeps the logic simple, fas
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+I am most satisfied with how the scheduler evolved from a simple list sorter into a smarter planner with filtering, recurrence, and conflict warnings.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+In another iteration, I would redesign conflict detection to support overlapping time windows instead of exact match only. I would also improve the Streamlit workflow for marking tasks complete directly in the UI.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+My key takeaway is that AI works best when I stay the lead architect. Copilot can speed up writing and testing, but I still need to choose the scope, keep the design simple, and verify behavior with clear tests.

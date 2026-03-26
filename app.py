@@ -119,6 +119,46 @@ else:
 
 st.divider()
 
+st.subheader("View and Filter Tasks")
+
+if st.session_state.owner.pets:
+    scheduler = Scheduler(owner=st.session_state.owner)
+    pet_options = ["All pets"] + [pet.name for pet in st.session_state.owner.pets]
+    selected_pet_filter = st.selectbox("Filter by pet", pet_options)
+    status_filter = st.selectbox(
+        "Filter by status",
+        ["All", "Pending", "Completed"],
+    )
+
+    filter_pet_name = None if selected_pet_filter == "All pets" else selected_pet_filter
+    if status_filter == "All":
+        filter_completed = None
+    elif status_filter == "Pending":
+        filter_completed = False
+    else:
+        filter_completed = True
+
+    filtered_items = scheduler.filter_tasks(pet_name=filter_pet_name, completed=filter_completed)
+    filtered_rows = [
+        {
+            "pet": pet_name,
+            "time": task.time,
+            "description": task.description,
+            "frequency": task.frequency,
+            "due_date": task.due_date.isoformat(),
+            "completed": task.completed,
+        }
+        for pet_name, task in filtered_items
+    ]
+
+    if filtered_rows:
+        st.success(f"Showing {len(filtered_rows)} task(s) with active filters.")
+        st.table(filtered_rows)
+    else:
+        st.info("No tasks match this filter.")
+
+st.divider()
+
 st.subheader("Build Schedule")
 st.caption("Generate today's schedule from all pet tasks.")
 
@@ -138,8 +178,17 @@ if st.button("Generate schedule"):
                         "time": task.time,
                         "description": task.description,
                         "frequency": task.frequency,
+                        "due_date": task.due_date.isoformat(),
                         "done": task.completed,
                     }
                     for task in schedule
                 ]
             )
+
+        warnings = scheduler.detect_conflicts()
+        if warnings:
+            st.warning("Task conflicts found. Review these before starting your day.")
+            for warning in warnings:
+                st.warning(warning)
+        else:
+            st.success("No task conflicts found for pending tasks.")

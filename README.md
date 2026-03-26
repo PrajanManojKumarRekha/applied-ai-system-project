@@ -22,6 +22,15 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Features
+
+- Add and manage multiple pets under one owner profile.
+- Add pet care tasks with time, frequency, due date, and completion state.
+- Sort tasks by time so the schedule is easy to follow.
+- Filter tasks by pet name and by completion status.
+- Auto create the next task when a daily or weekly task is completed.
+- Detect exact time conflicts and show warning messages.
+
 ## Getting started
 
 ### Setup
@@ -50,6 +59,10 @@ The scheduler now includes a few small algorithmic improvements to better suppor
 - Filtering by pet and status: tasks can be filtered by pet name and completion state.
 - Recurring task automation: when a daily or weekly task is completed, a new future task is created automatically.
 - Conflict detection: the scheduler returns warning messages when two pending tasks share the same date and time.
+
+## 📸 Demo
+
+<a href="/course_images/ai110/pawpal_app.png" target="_blank"><img src='/course_images/ai110/pawpal_app.png' title='PawPal App' width='' alt='PawPal App' class='center-block' /></a>
 
 ## Testing PawPal+
 

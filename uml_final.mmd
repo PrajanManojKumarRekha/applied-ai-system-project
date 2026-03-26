@@ -1,4 +1,4 @@
-const pawpalClassDiagram = `classDiagram
+classDiagram
     class Owner {
         +name: str
         +pets: List~Pet~
@@ -43,6 +43,4 @@ const pawpalClassDiagram = `classDiagram
     Owner "1" --> "0..*" Pet : has
     Pet "1" --> "0..*" Task : stores
     Scheduler "1" --> "1" Owner : reads
-    Scheduler ..> Task : sorts and filters`;
-
-export default pawpalClassDiagram;
+    Scheduler ..> Task : sorts and filters
