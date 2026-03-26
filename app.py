@@ -2,6 +2,8 @@ import streamlit as st
 
 from pawpal_system import Owner, Pet, Scheduler, Task
 
+DATA_FILE = "data.json"
+
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
 st.title("🐾 PawPal+")
@@ -10,9 +12,17 @@ st.markdown("Plan pet care tasks and build Today's schedule.")
 
 # Keep one Owner object in session state so data persists across reruns.
 if "owner" not in st.session_state:
-    st.session_state.owner = Owner(name="Jordan")
+    try:
+        st.session_state.owner = Owner.load_from_json(DATA_FILE)
+    except Exception:
+        st.session_state.owner = Owner(name="Jordan")
 if "daily_minutes_ui" not in st.session_state:
     st.session_state.daily_minutes_ui = st.session_state.owner.daily_time_available
+
+
+def save_owner_state() -> None:
+    """Persist owner data so pets and tasks survive app restarts."""
+    st.session_state.owner.save_to_json(DATA_FILE)
 
 with st.expander("Scenario", expanded=True):
     st.markdown(
@@ -39,7 +49,9 @@ st.divider()
 
 st.subheader("Owner And Pets")
 owner_name = st.text_input("Owner Name", value=st.session_state.owner.name)
-st.session_state.owner.name = owner_name
+if st.session_state.owner.name != owner_name:
+    st.session_state.owner.name = owner_name
+    save_owner_state()
 daily_minutes = st.number_input(
     "Daily Time Available (Minutes)",
     min_value=30,
@@ -49,6 +61,16 @@ daily_minutes = st.number_input(
 )
 if st.session_state.owner.daily_time_available != int(daily_minutes):
     st.session_state.owner.set_daily_time_available(int(daily_minutes))
+    save_owner_state()
+
+preferences_text = st.text_input(
+    "Preferred Task Keywords (Comma Separated)",
+    value=", ".join(st.session_state.owner.preferred_task_types),
+)
+parsed_preferences = [item.strip() for item in preferences_text.split(",") if item.strip()]
+if parsed_preferences != st.session_state.owner.preferred_task_types:
+    st.session_state.owner.set_preferences(parsed_preferences)
+    save_owner_state()
 
 with st.form("add_pet_form", clear_on_submit=True):
     pet_name = st.text_input("Pet Name")
@@ -66,6 +88,7 @@ if add_pet_submit:
                 Pet(name=clean_pet_name, species=species, care_notes=care_notes.strip())
             )
             st.success(f"Added pet: {clean_pet_name}")
+            save_owner_state()
         except ValueError as exc:
             st.error(str(exc))
 
@@ -116,6 +139,7 @@ if st.session_state.owner.pets:
                     )
                 )
                 st.success(f"Added task to {selected_pet_name}: {clean_task_description}")
+                save_owner_state()
             except (ValueError, TypeError) as exc:
                 st.error(str(exc))
 
@@ -144,8 +168,14 @@ if all_tasks:
                 "Time": row["time"],
                 "Duration Minutes": row["duration_minutes"],
                 "Priority": row["priority"],
+                "Priority Flag": (
+                    "🔴 High"
+                    if row["priority"] == "high"
+                    else "🟡 Medium" if row["priority"] == "medium" else "🟢 Low"
+                ),
                 "Frequency": row["frequency"],
                 "Completed": row["completed"],
+                "Status": "✅ Done" if row["completed"] else "⏳ Pending",
             }
             for row in all_tasks
         ]
@@ -212,11 +242,13 @@ if st.session_state.owner.pets:
             if st.button("Mark As Completed") and selected_task is not None:
                 selected_task.mark_complete()
                 st.success("Task marked as completed.")
+                save_owner_state()
                 st.rerun()
         with col2:
             if st.button("Mark As Pending") and selected_task is not None:
                 selected_task.mark_incomplete()
                 st.success("Task marked as pending.")
+                save_owner_state()
                 st.rerun()
     else:
         st.info("No tasks match this filter.")
@@ -225,6 +257,10 @@ st.divider()
 
 st.subheader("Build Schedule")
 st.caption("Generate today's schedule from all pet tasks using priority and time constraints.")
+
+slot_duration = st.number_input("Next Slot Duration (Minutes)", min_value=1, max_value=240, value=30)
+slot_pet_options = ["All Pets"] + [pet.name for pet in st.session_state.owner.pets]
+slot_pet_choice = st.selectbox("Find Slot For", slot_pet_options)
 
 if st.button("Generate schedule"):
     if not st.session_state.owner.pets:
@@ -243,9 +279,13 @@ if st.button("Generate schedule"):
                         "Description": task.description,
                         "Duration Minutes": task.duration_minutes,
                         "Priority": task.priority,
+                        "Priority Flag": (
+                            "🔴 High" if task.priority == "high" else "🟡 Medium" if task.priority == "medium" else "🟢 Low"
+                        ),
                         "Frequency": task.frequency,
                         "Due Date": task.due_date.isoformat(),
                         "Done": task.completed,
+                        "Status": "✅ Done" if task.completed else "⏳ Pending",
                     }
                     for task in schedule
                 ]
@@ -276,3 +316,12 @@ if st.button("Generate schedule"):
                 st.warning(warning)
         else:
             st.success("No task conflicts found for pending tasks.")
+
+        next_slot = scheduler.next_available_slot(
+            duration_minutes=int(slot_duration),
+            pet_name=None if slot_pet_choice == "All Pets" else slot_pet_choice,
+        )
+        if next_slot is None:
+            st.info("No open slot found for the selected duration.")
+        else:
+            st.success(f"Next available slot: {next_slot}")
