@@ -1,5 +1,7 @@
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, List, Optional
 
 
@@ -44,6 +46,31 @@ class Task:
         """Mark the task as not completed."""
         self.completed = False
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert a task object into a JSON friendly dictionary."""
+        return {
+            "description": self.description,
+            "time": self.time,
+            "frequency": self.frequency,
+            "duration_minutes": self.duration_minutes,
+            "priority": self.priority,
+            "due_date": self.due_date.isoformat(),
+            "completed": self.completed,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "Task":
+        """Create a task object from a dictionary payload."""
+        return cls(
+            description=payload["description"],
+            time=payload["time"],
+            frequency=payload["frequency"],
+            duration_minutes=int(payload.get("duration_minutes", 30)),
+            priority=payload.get("priority", "medium"),
+            due_date=date.fromisoformat(payload.get("due_date", date.today().isoformat())),
+            completed=bool(payload.get("completed", False)),
+        )
+
 
 @dataclass
 class Pet:
@@ -69,6 +96,25 @@ class Pet:
     def get_pending_tasks(self) -> List[Task]:
         """Return incomplete tasks for this pet."""
         return [task for task in self.tasks if not task.completed]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert a pet object into a JSON friendly dictionary."""
+        return {
+            "name": self.name,
+            "species": self.species,
+            "care_notes": self.care_notes,
+            "tasks": [task.to_dict() for task in self.tasks],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "Pet":
+        """Create a pet object from a dictionary payload."""
+        return cls(
+            name=payload["name"],
+            species=payload["species"],
+            care_notes=payload.get("care_notes", ""),
+            tasks=[Task.from_dict(item) for item in payload.get("tasks", [])],
+        )
 
 
 @dataclass
@@ -102,6 +148,39 @@ class Owner:
     def set_preferences(self, preferred_task_types: List[str]) -> None:
         """Set owner task preferences used by planning logic."""
         self.preferred_task_types = [item.strip().lower() for item in preferred_task_types if item.strip()]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert an owner object into a JSON friendly dictionary."""
+        return {
+            "name": self.name,
+            "daily_time_available": self.daily_time_available,
+            "preferred_task_types": self.preferred_task_types,
+            "pets": [pet.to_dict() for pet in self.pets],
+        }
+
+    def save_to_json(self, file_path: str = "data.json") -> None:
+        """Save owner, pets, and tasks to a JSON file."""
+        path = Path(file_path)
+        path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "Owner":
+        """Create an owner object from a dictionary payload."""
+        return cls(
+            name=payload.get("name", "Jordan"),
+            daily_time_available=int(payload.get("daily_time_available", 180)),
+            preferred_task_types=payload.get("preferred_task_types", []),
+            pets=[Pet.from_dict(item) for item in payload.get("pets", [])],
+        )
+
+    @classmethod
+    def load_from_json(cls, file_path: str = "data.json") -> "Owner":
+        """Load owner data from JSON or return a default owner if file does not exist."""
+        path = Path(file_path)
+        if not path.exists():
+            return cls(name="Jordan")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return cls.from_dict(payload)
 
     def get_pet_by_name(self, pet_name: str) -> Optional[Pet]:
         """Return the pet with this name or None if it is missing."""
@@ -159,6 +238,16 @@ class Scheduler:
             key=lambda task: (-self.PRIORITY_SCORES.get(task.priority, 0), self._time_key(task)),
         )
 
+    def score_task(self, task: Task) -> int:
+        """Return a weighted score using priority and owner preferences."""
+        score = self.PRIORITY_SCORES.get(task.priority, 0) * 10
+        description_lower = task.description.lower()
+        if any(keyword in description_lower for keyword in self.owner.preferred_task_types):
+            score += 5
+        if task.frequency == "daily":
+            score += 2
+        return score
+
     def filter_tasks(
         self,
         pet_name: Optional[str] = None,
@@ -205,7 +294,10 @@ class Scheduler:
                 return []
             pending_today = [task for task in target_pet.get_pending_tasks() if task.due_date == date.today()]
 
-        ranked_tasks = self.sort_by_priority_then_time(pending_today)
+        ranked_tasks = sorted(
+            pending_today,
+            key=lambda task: (-self.score_task(task), self._time_key(task)),
+        )
 
         plan: List[dict[str, Any]] = []
         used_minutes = 0
@@ -215,7 +307,7 @@ class Scheduler:
 
             reason = (
                 f"Selected {task.description} at {task.time} because it is {task.priority} priority "
-                f"and fits the remaining {minutes_budget - used_minutes} minutes."
+                "and fits the daily time budget."
             )
             plan.append(
                 {
@@ -279,3 +371,45 @@ class Scheduler:
             warnings.append(f"Conflict at {time_text} on {due_date.isoformat()}: {details}")
 
         return warnings
+
+    def next_available_slot(
+        self,
+        duration_minutes: int,
+        target_date: Optional[date] = None,
+        start_time: str = "06:00",
+        end_time: str = "22:00",
+        pet_name: Optional[str] = None,
+    ) -> Optional[str]:
+        """Find the next open time slot that can fit the requested duration."""
+        if duration_minutes <= 0:
+            raise ValueError("Duration must be greater than zero.")
+
+        schedule_date = date.today() if target_date is None else target_date
+        start_dt = datetime.combine(schedule_date, datetime.strptime(start_time, "%H:%M").time())
+        end_dt = datetime.combine(schedule_date, datetime.strptime(end_time, "%H:%M").time())
+        if end_dt <= start_dt:
+            raise ValueError("End time must be after start time.")
+
+        tasks_for_day: List[Task] = []
+        if pet_name:
+            pet = self.owner.get_pet_by_name(pet_name)
+            if pet is None:
+                return None
+            tasks_for_day = [task for task in pet.get_pending_tasks() if task.due_date == schedule_date]
+        else:
+            tasks_for_day = [task for task in self.owner.get_all_pending_tasks() if task.due_date == schedule_date]
+
+        tasks_sorted = self.sort_by_time(tasks_for_day)
+        cursor = start_dt
+        for task in tasks_sorted:
+            task_start = datetime.combine(schedule_date, datetime.strptime(task.time, "%H:%M").time())
+            if task_start - cursor >= timedelta(minutes=duration_minutes):
+                return cursor.strftime("%H:%M")
+
+            task_end = task_start + timedelta(minutes=task.duration_minutes)
+            if task_end > cursor:
+                cursor = task_end
+
+        if end_dt - cursor >= timedelta(minutes=duration_minutes):
+            return cursor.strftime("%H:%M")
+        return None

@@ -8,9 +8,10 @@ def print_schedule(tasks: list[Task]) -> None:
     print(f"{'Time':<8} {'Task':<25} {'Dur':<5} {'Prio':<7} {'Freq':<10} {'Due Date':<12} {'Done'}")
     print("-" * 92)
     for task in tasks:
-        status = "Yes" if task.completed else "No"
+        status = "✅" if task.completed else "⏳"
+        priority_flag = "🔴" if task.priority == "high" else "🟡" if task.priority == "medium" else "🟢"
         print(
-            f"{task.time:<8} {task.description:<25} {task.duration_minutes:<5} {task.priority:<7} {task.frequency:<10} "
+            f"{task.time:<8} {task.description:<25} {task.duration_minutes:<5} {priority_flag} {task.priority:<5} {task.frequency:<10} "
             f"{task.due_date.isoformat():<12} {status}"
         )
 
@@ -74,6 +75,10 @@ def main() -> None:
     for item in scheduler.build_daily_plan():
         print(f"- {item['time']} {item['description']} ({item['priority']}, {item['duration_minutes']} min)")
         print(f"  Reason: {item['reason']}")
+
+    print()
+    slot = scheduler.next_available_slot(duration_minutes=20)
+    print(f"Next available 20-minute slot: {slot}")
 
 
 if __name__ == "__main__":

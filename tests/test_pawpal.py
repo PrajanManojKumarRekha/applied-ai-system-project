@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -165,3 +166,60 @@ def test_duplicate_pet_name_raises_value_error() -> None:
 
     with pytest.raises(ValueError):
         owner.add_pet(Pet(name="Mochi", species="cat"))
+
+
+def test_next_available_slot_returns_open_time() -> None:
+    owner = Owner(name="Jordan")
+    pet = Pet(name="Mochi", species="dog")
+    pet.add_task(
+        Task(
+            description="Morning walk",
+            time="08:00",
+            frequency="daily",
+            duration_minutes=30,
+            priority="high",
+        )
+    )
+    pet.add_task(
+        Task(
+            description="Lunch feed",
+            time="12:00",
+            frequency="daily",
+            duration_minutes=20,
+            priority="medium",
+        )
+    )
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner=owner)
+    slot = scheduler.next_available_slot(duration_minutes=15, start_time="08:30", end_time="11:00")
+
+    assert slot == "08:30"
+
+
+def test_owner_save_and_load_json_round_trip(tmp_path: Path) -> None:
+    data_file = tmp_path / "data.json"
+
+    owner = Owner(name="Jordan", daily_time_available=90, preferred_task_types=["walk"])
+    pet = Pet(name="Mochi", species="dog")
+    pet.add_task(
+        Task(
+            description="Morning walk",
+            time="08:00",
+            frequency="daily",
+            duration_minutes=30,
+            priority="high",
+        )
+    )
+    owner.add_pet(pet)
+    owner.save_to_json(str(data_file))
+
+    restored = Owner.load_from_json(str(data_file))
+
+    assert restored.name == "Jordan"
+    assert restored.daily_time_available == 90
+    assert restored.preferred_task_types == ["walk"]
+    assert len(restored.pets) == 1
+    assert restored.pets[0].name == "Mochi"
+    assert len(restored.pets[0].tasks) == 1
+    assert restored.pets[0].tasks[0].priority == "high"
