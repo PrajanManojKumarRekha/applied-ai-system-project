@@ -100,3 +100,17 @@ In another iteration, I would redesign conflict detection to support overlapping
 **c. Key takeaway**
 
 My key takeaway is that AI works best when I stay the lead architect. Copilot can speed up writing and testing, but I still need to choose the scope, keep the design simple, and verify behavior with clear tests.
+
+---
+
+## 6. Prompt Comparison
+
+I compared one complex prompt about weekly rescheduling logic across two model responses, GPT and Gemini.
+
+The GPT response was more modular in structure and easier to plug into my existing class methods. It suggested clear helper methods and cleaner control flow for recurrence handling.
+
+The Gemini response was also useful, but it focused more on broad explanation and less on direct method level integration.
+
+I used the more modular style because it was easier to test with pytest and easier to maintain.
+
+Using separate chat sessions for design, implementation, and testing helped me stay organized. It reduced context mixing and made each decision easier to verify.

@@ -30,6 +30,9 @@ Your final app should:
 - Filter tasks by pet name and by completion status.
 - Auto create the next task when a daily or weekly task is completed.
 - Detect exact time conflicts and show warning messages.
+- Find the next available open slot for a requested task duration.
+- Save and load owner, pet, and task data from `data.json` between app runs.
+- Use weighted priority scoring that considers priority and owner preferences.
 
 ## Getting started
 
@@ -59,6 +62,17 @@ The scheduler now includes a few small algorithmic improvements to better suppor
 - Filtering by pet and status: tasks can be filtered by pet name and completion state.
 - Recurring task automation: when a daily or weekly task is completed, a new future task is created automatically.
 - Conflict detection: the scheduler returns warning messages when two pending tasks share the same date and time.
+- Next available slot: the scheduler can suggest the next open time window for a task.
+- Weighted planning: daily plan selection combines priority with owner preference keywords.
+
+## Agent Mode Notes
+
+Agent Mode was used to implement and refine advanced scheduling logic in small phases:
+
+- Added planning guard rails and weighted scoring in `pawpal_system.py`.
+- Added persistence methods `save_to_json` and `load_from_json` in `Owner`.
+- Updated `app.py` to load persisted state on startup and save changes after updates.
+- Added next available slot logic and connected it to the Streamlit UI.
 
 ## 📸 Demo
 
@@ -81,6 +95,8 @@ The tests currently cover:
 - recurring daily task creation for the next day
 - exact time conflict warnings
 - pets with no tasks
+- next available slot calculation
+- JSON save and load round trip behavior
 
 Confidence Level: 4/5 stars
 
