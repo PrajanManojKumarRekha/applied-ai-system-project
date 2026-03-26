@@ -1,0 +1,35 @@
+{
+  "name": "Jordan",
+  "daily_time_available": 180,
+  "preferred_task_types": [],
+  "pets": [
+    {
+      "name": ",",
+      "species": "dog",
+      "care_notes": "he",
+      "tasks": [
+        {
+          "description": "Morning walk",
+          "time": "01:30",
+          "frequency": "daily",
+          "duration_minutes": 30,
+          "priority": "high",
+          "due_date": "2026-03-25",
+          "completed": false
+        }
+      ]
+    },
+    {
+      "name": "woof",
+      "species": "dog",
+      "care_notes": "needs to be groomed well.",
+      "tasks": []
+    },
+    {
+      "name": "mr meow",
+      "species": "cat",
+      "care_notes": "only vegan food",
+      "tasks": []
+    }
+  ]
+}
