@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import pytest
+
 from pawpal_system import Owner, Pet, Scheduler, Task
 
 
@@ -24,8 +26,8 @@ def test_adding_task_to_pet_increases_count() -> None:
 def test_scheduler_sorts_tasks_by_time() -> None:
     owner = Owner(name="Jordan")
     pet = Pet(name="Mochi", species="dog")
-    pet.add_task(Task(description="Noon meal", time="12:00", frequency="daily"))
-    pet.add_task(Task(description="Morning walk", time="08:00", frequency="daily"))
+    pet.add_task(Task(description="Noon meal", time="12:00", frequency="daily", priority="low"))
+    pet.add_task(Task(description="Morning walk", time="08:00", frequency="daily", priority="high"))
     owner.add_pet(pet)
 
     scheduler = Scheduler(owner=owner)
@@ -58,7 +60,15 @@ def test_scheduler_filters_by_pet_and_status() -> None:
 def test_mark_complete_creates_next_daily_task() -> None:
     owner = Owner(name="Jordan")
     pet = Pet(name="Mochi", species="dog")
-    pet.add_task(Task(description="Morning walk", time="08:00", frequency="daily"))
+    pet.add_task(
+        Task(
+            description="Morning walk",
+            time="08:00",
+            frequency="daily",
+            duration_minutes=20,
+            priority="high",
+        )
+    )
     owner.add_pet(pet)
     scheduler = Scheduler(owner=owner)
 
@@ -69,6 +79,8 @@ def test_mark_complete_creates_next_daily_task() -> None:
     assert pet.tasks[0].completed is True
     assert pet.tasks[1].completed is False
     assert pet.tasks[1].due_date == pet.tasks[0].due_date + timedelta(days=1)
+    assert pet.tasks[1].duration_minutes == pet.tasks[0].duration_minutes
+    assert pet.tasks[1].priority == pet.tasks[0].priority
 
 
 def test_detect_conflicts_returns_warning() -> None:
@@ -95,3 +107,61 @@ def test_pet_with_no_tasks_returns_empty_schedule() -> None:
     schedule = scheduler.get_todays_schedule()
 
     assert schedule == []
+
+
+def test_build_daily_plan_uses_priority_and_time_budget() -> None:
+    owner = Owner(name="Jordan", daily_time_available=45)
+    pet = Pet(name="Mochi", species="dog")
+    pet.add_task(
+        Task(
+            description="Morning walk",
+            time="08:00",
+            frequency="daily",
+            duration_minutes=30,
+            priority="high",
+        )
+    )
+    pet.add_task(
+        Task(
+            description="Long grooming",
+            time="09:00",
+            frequency="weekly",
+            duration_minutes=40,
+            priority="low",
+        )
+    )
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner=owner)
+    plan = scheduler.build_daily_plan()
+
+    assert len(plan) == 1
+    assert plan[0]["description"] == "Morning walk"
+    assert "Selected Morning walk" in plan[0]["reason"]
+
+
+def test_build_daily_plan_is_returned_in_time_order() -> None:
+    owner = Owner(name="Jordan", daily_time_available=120)
+    pet = Pet(name="Mochi", species="dog")
+    pet.add_task(Task(description="Evening meds", time="19:30", frequency="daily", priority="high"))
+    pet.add_task(Task(description="Morning walk", time="08:00", frequency="daily", priority="medium"))
+    pet.add_task(Task(description="Lunch feed", time="12:00", frequency="daily", priority="low"))
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner=owner)
+    plan = scheduler.build_daily_plan()
+
+    assert [item["time"] for item in plan] == ["08:00", "12:00", "19:30"]
+
+
+def test_invalid_task_time_raises_value_error() -> None:
+    with pytest.raises(ValueError):
+        Task(description="Bad time", time="25:61", frequency="daily")
+
+
+def test_duplicate_pet_name_raises_value_error() -> None:
+    owner = Owner(name="Jordan")
+    owner.add_pet(Pet(name="Mochi", species="dog"))
+
+    with pytest.raises(ValueError):
+        owner.add_pet(Pet(name="Mochi", species="cat"))
