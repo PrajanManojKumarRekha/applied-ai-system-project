@@ -85,3 +85,13 @@ def test_detect_conflicts_returns_warning() -> None:
 
     assert len(warnings) == 1
     assert "Conflict at 08:00" in warnings[0]
+
+
+def test_pet_with_no_tasks_returns_empty_schedule() -> None:
+    owner = Owner(name="Jordan")
+    owner.add_pet(Pet(name="Mochi", species="dog"))
+
+    scheduler = Scheduler(owner=owner)
+    schedule = scheduler.get_todays_schedule()
+
+    assert schedule == []

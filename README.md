@@ -50,3 +50,25 @@ The scheduler now includes a few small algorithmic improvements to better suppor
 - Filtering by pet and status: tasks can be filtered by pet name and completion state.
 - Recurring task automation: when a daily or weekly task is completed, a new future task is created automatically.
 - Conflict detection: the scheduler returns warning messages when two pending tasks share the same date and time.
+
+## Testing PawPal+
+
+Run the test suite with:
+
+```bash
+python -m pytest
+```
+
+The tests currently cover:
+
+- task completion state changes
+- adding tasks to pets
+- time based sorting correctness
+- filtering by pet and completion status
+- recurring daily task creation for the next day
+- exact time conflict warnings
+- pets with no tasks
+
+Confidence Level: 4/5 stars
+
+The scheduler is reliable for the tested paths and common edge cases. The next area to expand is overlap checking for tasks with durations.
