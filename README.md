@@ -34,6 +34,13 @@ Your final app should:
 - Save and load owner, pet, and task data from `data.json` between app runs.
 - Use weighted priority scoring that considers priority and owner preferences.
 
+## Class Design Summary
+
+- Owner: stores owner identity, daily time budget, preferred task keywords, and list of pets.
+- Pet: stores pet identity data and the list of tasks for that pet.
+- Task: stores task description, due time, due date, duration, priority, frequency, and completion state.
+- Scheduler: retrieves tasks across pets, applies sorting and filtering algorithms, builds explainable daily plans, detects conflicts, and finds open time slots.
+
 ## Getting started
 
 ### Setup
@@ -42,6 +49,18 @@ Your final app should:
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+### Run The App
+
+```bash
+streamlit run app.py
+```
+
+### Run The Demo Script
+
+```bash
+python main.py
 ```
 
 ### Suggested workflow
@@ -76,8 +95,7 @@ Agent Mode was used to implement and refine advanced scheduling logic in small p
 
 ## 📸 Demo
 
-<a href="/course_images/ai110/pawpal_app.png" target="_blank"><img src='/course_images/ai110/pawpal_app.png' title='PawPal App' width='' alt='PawPal App' class='center-block' /></a>
-
+![alt text](image.png)![alt text](image-1.png)![alt text](image-2.png)![alt text](image-3.png)
 ## Testing PawPal+
 
 Run the test suite with:
