@@ -48,8 +48,9 @@ I also kept scoring in Scheduler and did not split it into too many small classe
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+One tradeoff in my scheduler is conflict detection. Right now it checks only exact date and time matches, not overlapping durations.
+
+This is reasonable for this project stage because it keeps the logic simple, fast to run, and easy to explain. It still catches common schedule issues, and I can add overlap checks later if needed.
 
 ---
 
