@@ -16,7 +16,6 @@ class Task:
     completed: bool = False
 
     def __post_init__(self) -> None:
-        """Validate task values to keep scheduler input safe and consistent."""
         self.description = self.description.strip()
         self.frequency = self.frequency.strip().lower()
         self.priority = self.priority.strip().lower()
@@ -39,15 +38,12 @@ class Task:
             raise ValueError("Task duration must be greater than zero.")
 
     def mark_complete(self) -> None:
-        """Mark the task as completed."""
         self.completed = True
 
     def mark_incomplete(self) -> None:
-        """Mark the task as not completed."""
         self.completed = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert a task object into a JSON friendly dictionary."""
         return {
             "description": self.description,
             "time": self.time,
@@ -60,7 +56,6 @@ class Task:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "Task":
-        """Create a task object from a dictionary payload."""
         return cls(
             description=payload["description"],
             time=payload["time"],
@@ -73,47 +68,107 @@ class Task:
 
 
 @dataclass
+class HealthRecord:
+    record_type: str
+    description: str
+    record_date: date = field(default_factory=date.today)
+    notes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "record_type": self.record_type,
+            "description": self.description,
+            "record_date": self.record_date.isoformat(),
+            "notes": self.notes,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "HealthRecord":
+        return cls(
+            record_type=payload.get("record_type", "general"),
+            description=payload["description"],
+            record_date=date.fromisoformat(payload.get("record_date", date.today().isoformat())),
+            notes=payload.get("notes", ""),
+        )
+
+
+@dataclass
 class Pet:
     name: str
     species: str
     care_notes: str = ""
     tasks: List[Task] = field(default_factory=list)
+    health_records: List[HealthRecord] = field(default_factory=list)
+    streak_days: int = 0
+    last_streak_date: Optional[date] = None
 
     def update_notes(self, notes: str) -> None:
-        """Update the pet care notes."""
         self.care_notes = notes
 
     def add_task(self, task: Task) -> None:
-        """Add a task to this pet."""
         if not isinstance(task, Task):
             raise TypeError("Pet.add_task expects a Task instance.")
         self.tasks.append(task)
 
+    def add_health_record(self, record: HealthRecord) -> None:
+        if not isinstance(record, HealthRecord):
+            raise TypeError("Pet.add_health_record expects a HealthRecord instance.")
+        self.health_records.append(record)
+
     def get_tasks(self) -> List[Task]:
-        """Return all tasks for this pet."""
         return self.tasks
 
     def get_pending_tasks(self) -> List[Task]:
-        """Return incomplete tasks for this pet."""
         return [task for task in self.tasks if not task.completed]
 
+    def get_health_records(self) -> List[HealthRecord]:
+        return sorted(self.health_records, key=lambda r: r.record_date, reverse=True)
+
+    def update_streak(self) -> None:
+        """Recalculate consecutive-day completion streak for daily tasks."""
+        today = date.today()
+        daily_tasks_today = [
+            t for t in self.tasks
+            if t.frequency == "daily" and t.due_date == today
+        ]
+        if not daily_tasks_today:
+            return
+
+        all_done = all(t.completed for t in daily_tasks_today)
+        if all_done:
+            if self.last_streak_date == today - timedelta(days=1) or self.last_streak_date == today:
+                if self.last_streak_date != today:
+                    self.streak_days += 1
+                    self.last_streak_date = today
+            else:
+                self.streak_days = 1
+                self.last_streak_date = today
+        else:
+            if self.last_streak_date != today:
+                self.streak_days = 0
+
     def to_dict(self) -> dict[str, Any]:
-        """Convert a pet object into a JSON friendly dictionary."""
         return {
             "name": self.name,
             "species": self.species,
             "care_notes": self.care_notes,
             "tasks": [task.to_dict() for task in self.tasks],
+            "health_records": [r.to_dict() for r in self.health_records],
+            "streak_days": self.streak_days,
+            "last_streak_date": self.last_streak_date.isoformat() if self.last_streak_date else None,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "Pet":
-        """Create a pet object from a dictionary payload."""
+        last_streak_raw = payload.get("last_streak_date")
         return cls(
             name=payload["name"],
             species=payload["species"],
             care_notes=payload.get("care_notes", ""),
             tasks=[Task.from_dict(item) for item in payload.get("tasks", [])],
+            health_records=[HealthRecord.from_dict(r) for r in payload.get("health_records", [])],
+            streak_days=int(payload.get("streak_days", 0)),
+            last_streak_date=date.fromisoformat(last_streak_raw) if last_streak_raw else None,
         )
 
 
@@ -125,7 +180,6 @@ class Owner:
     pets: List[Pet] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        """Normalize owner inputs and validate available time."""
         self.name = self.name.strip()
         if not self.name:
             raise ValueError("Owner name cannot be empty.")
@@ -134,23 +188,19 @@ class Owner:
         self.preferred_task_types = [item.strip().lower() for item in self.preferred_task_types if item.strip()]
 
     def add_pet(self, pet: Pet) -> None:
-        """Add a pet for this owner."""
         if self.get_pet_by_name(pet.name) is not None:
             raise ValueError(f"Pet named '{pet.name}' already exists.")
         self.pets.append(pet)
 
     def set_daily_time_available(self, minutes: int) -> None:
-        """Set the daily minutes available for scheduling."""
         if minutes <= 0:
             raise ValueError("Daily time must be greater than zero.")
         self.daily_time_available = minutes
 
     def set_preferences(self, preferred_task_types: List[str]) -> None:
-        """Set owner task preferences used by planning logic."""
         self.preferred_task_types = [item.strip().lower() for item in preferred_task_types if item.strip()]
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert an owner object into a JSON friendly dictionary."""
         return {
             "name": self.name,
             "daily_time_available": self.daily_time_available,
@@ -159,13 +209,11 @@ class Owner:
         }
 
     def save_to_json(self, file_path: str = "data.json") -> None:
-        """Save owner, pets, and tasks to a JSON file."""
         path = Path(file_path)
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "Owner":
-        """Create an owner object from a dictionary payload."""
         return cls(
             name=payload.get("name", "Jordan"),
             daily_time_available=int(payload.get("daily_time_available", 180)),
@@ -175,7 +223,6 @@ class Owner:
 
     @classmethod
     def load_from_json(cls, file_path: str = "data.json") -> "Owner":
-        """Load owner data from JSON or return a default owner if file does not exist."""
         path = Path(file_path)
         if not path.exists():
             return cls(name="Jordan")
@@ -183,25 +230,35 @@ class Owner:
         return cls.from_dict(payload)
 
     def get_pet_by_name(self, pet_name: str) -> Optional[Pet]:
-        """Return the pet with this name or None if it is missing."""
         for pet in self.pets:
             if pet.name == pet_name:
                 return pet
         return None
 
     def get_all_tasks(self) -> List[Task]:
-        """Return tasks from all pets."""
         all_tasks: List[Task] = []
         for pet in self.pets:
             all_tasks.extend(pet.get_tasks())
         return all_tasks
 
     def get_all_pending_tasks(self) -> List[Task]:
-        """Return incomplete tasks from all pets."""
         pending_tasks: List[Task] = []
         for pet in self.pets:
             pending_tasks.extend(pet.get_pending_tasks())
         return pending_tasks
+
+    def completion_rate(self) -> float:
+        all_tasks = self.get_all_tasks()
+        if not all_tasks:
+            return 0.0
+        done = sum(1 for t in all_tasks if t.completed)
+        return round(done / len(all_tasks), 2)
+
+    def total_minutes_scheduled(self) -> int:
+        return sum(t.duration_minutes for t in self.get_all_tasks())
+
+    def total_minutes_completed(self) -> int:
+        return sum(t.duration_minutes for t in self.get_all_tasks() if t.completed)
 
 
 @dataclass
@@ -211,11 +268,9 @@ class Scheduler:
     PRIORITY_SCORES = {"high": 3, "medium": 2, "low": 1}
 
     def _time_key(self, task: Task) -> datetime:
-        """Convert task time text into a sortable datetime value."""
         return datetime.strptime(task.time, "%H:%M")
 
     def _next_due_date(self, task: Task) -> Optional[date]:
-        """Return the next due date for recurring tasks, or None otherwise."""
         frequency = task.frequency.strip().lower()
         if frequency == "daily":
             return task.due_date + timedelta(days=1)
@@ -224,22 +279,18 @@ class Scheduler:
         return None
 
     def get_all_tasks(self) -> List[Task]:
-        """Get all tasks from every pet owned by the owner."""
         return self.owner.get_all_tasks()
 
     def sort_by_time(self, tasks: List[Task]) -> List[Task]:
-        """Return tasks sorted by time in HH:MM format."""
         return sorted(tasks, key=self._time_key)
 
     def sort_by_priority_then_time(self, tasks: List[Task]) -> List[Task]:
-        """Sort tasks by priority first, then by time."""
         return sorted(
             tasks,
             key=lambda task: (-self.PRIORITY_SCORES.get(task.priority, 0), self._time_key(task)),
         )
 
     def score_task(self, task: Task) -> int:
-        """Return a weighted score using priority and owner preferences."""
         score = self.PRIORITY_SCORES.get(task.priority, 0) * 10
         description_lower = task.description.lower()
         if any(keyword in description_lower for keyword in self.owner.preferred_task_types):
@@ -253,7 +304,6 @@ class Scheduler:
         pet_name: Optional[str] = None,
         completed: Optional[bool] = None,
     ) -> List[tuple[str, Task]]:
-        """Return tasks filtered by pet name and or completion status."""
         filtered: List[tuple[str, Task]] = []
         for pet in self.owner.pets:
             if pet_name and pet.name != pet_name:
@@ -266,12 +316,10 @@ class Scheduler:
         return sorted(filtered, key=lambda pair: self._time_key(pair[1]))
 
     def get_todays_schedule(self) -> List[Task]:
-        """Return all tasks sorted by time for today."""
         today_tasks = [task for task in self.get_all_tasks() if task.due_date == date.today()]
         return self.sort_by_time(today_tasks)
 
     def get_pending_schedule(self) -> List[Task]:
-        """Return only incomplete tasks sorted by time."""
         pending = [task for task in self.owner.get_all_pending_tasks() if task.due_date == date.today()]
         return self.sort_by_time(pending)
 
@@ -280,7 +328,6 @@ class Scheduler:
         daily_minutes_available: Optional[int] = None,
         pet_name: Optional[str] = None,
     ) -> List[dict[str, Any]]:
-        """Build an explainable daily plan based on time and priority constraints."""
         minutes_budget = (
             self.owner.daily_time_available if daily_minutes_available is None else daily_minutes_available
         )
@@ -324,11 +371,9 @@ class Scheduler:
         return sorted(plan, key=lambda item: datetime.strptime(item["time"], "%H:%M"))
 
     def explain_plan(self, plan: List[dict[str, Any]]) -> List[str]:
-        """Return plain language reasons for each task in a built plan."""
         return [item["reason"] for item in plan]
 
     def mark_task_complete(self, pet_name: str, task_description: str, task_time: str) -> bool:
-        """Mark one matching task complete and create next recurring task if needed."""
         pet = self.owner.get_pet_by_name(pet_name)
         if pet is None:
             return False
@@ -336,6 +381,7 @@ class Scheduler:
         for task in pet.tasks:
             if task.description == task_description and task.time == task_time and not task.completed:
                 task.mark_complete()
+                pet.update_streak()
 
                 next_due = self._next_due_date(task)
                 if next_due is not None:
@@ -354,7 +400,6 @@ class Scheduler:
         return False
 
     def detect_conflicts(self) -> List[str]:
-        """Return warning messages when two or more pending tasks share the same due date and time."""
         slots: dict[tuple[date, str], List[tuple[str, str]]] = {}
         for pet in self.owner.pets:
             for task in pet.tasks:
@@ -380,7 +425,6 @@ class Scheduler:
         end_time: str = "22:00",
         pet_name: Optional[str] = None,
     ) -> Optional[str]:
-        """Find the next open time slot that can fit the requested duration."""
         if duration_minutes <= 0:
             raise ValueError("Duration must be greater than zero.")
 
@@ -413,3 +457,25 @@ class Scheduler:
         if end_dt - cursor >= timedelta(minutes=duration_minutes):
             return cursor.strftime("%H:%M")
         return None
+
+    def export_schedule_text(self) -> str:
+        """Return today's schedule as a plain-text block suitable for copying."""
+        today = date.today().isoformat()
+        lines = [f"PawPal+ Schedule for {today}", "=" * 40]
+        schedule = self.get_todays_schedule()
+        if not schedule:
+            lines.append("No tasks scheduled for today.")
+        else:
+            for task in schedule:
+                status = "DONE" if task.completed else "PENDING"
+                lines.append(
+                    f"{task.time}  [{status}]  {task.description}  "
+                    f"({task.duration_minutes} min, {task.priority})"
+                )
+        lines.append("")
+        plan = self.build_daily_plan()
+        if plan:
+            lines.append("Recommended Plan:")
+            for item in plan:
+                lines.append(f"  {item['time']}  {item['description']}  - {item['reason']}")
+        return "\n".join(lines)
