@@ -229,6 +229,30 @@ class Owner:
         payload = json.loads(path.read_text(encoding="utf-8"))
         return cls.from_dict(payload)
 
+    @staticmethod
+    def load_all(file_path: str = "owners.json") -> "list[Owner]":
+        """Load all owners. Falls back to legacy data.json on first run."""
+        path = Path(file_path)
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return [Owner.from_dict(o) for o in raw]
+        legacy = Path("data.json")
+        if legacy.exists():
+            try:
+                owner = Owner.from_dict(json.loads(legacy.read_text(encoding="utf-8")))
+                Owner.save_all([owner], file_path)
+                return [owner]
+            except Exception:
+                pass
+        default = Owner(name="My Account")
+        Owner.save_all([default], file_path)
+        return [default]
+
+    @staticmethod
+    def save_all(owners: "list[Owner]", file_path: str = "owners.json") -> None:
+        path = Path(file_path)
+        path.write_text(json.dumps([o.to_dict() for o in owners], indent=2), encoding="utf-8")
+
     def get_pet_by_name(self, pet_name: str) -> Optional[Pet]:
         for pet in self.pets:
             if pet.name == pet_name:
