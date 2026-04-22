@@ -4,10 +4,11 @@ Agentic workflow that analyzes a pet owner's schedule and returns structured
 care advice with a confidence score and guardrail filtering.
 
 Steps in the workflow:
-  1. Build a context summary from owner/pet/task data.
-  2. Call Claude to produce a structured JSON response (advice + score).
-  3. Validate the response format (guardrail).
-  4. Return a typed AdvisorResult to the caller.
+  1. Load the Groq API key from the .env file.
+  2. Build a context summary from owner/pet/task data.
+  3. Call a Groq-hosted model to produce a structured JSON response.
+  4. Validate the response format (guardrail).
+  5. Return a typed AdvisorResult to the caller.
 """
 
 import json
@@ -16,7 +17,10 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
-import anthropic
+from dotenv import load_dotenv
+from groq import Groq
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +61,6 @@ class AdvisorResult:
 
 
 def _build_context(owner_data: dict[str, Any]) -> str:
-    """Convert owner dict to a plain-text context string for the model."""
     lines: list[str] = []
     lines.append(f"Owner: {owner_data.get('name', 'Unknown')}")
     lines.append(f"Daily time available: {owner_data.get('daily_time_available', 0)} minutes")
@@ -90,7 +93,6 @@ def _build_context(owner_data: dict[str, Any]) -> str:
 
 
 def _parse_response(text: str) -> dict[str, Any]:
-    """Extract JSON from the model response and validate required keys."""
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -124,8 +126,7 @@ def _parse_response(text: str) -> dict[str, Any]:
 def get_care_advice(
     owner_data: dict[str, Any],
     user_question: Optional[str] = None,
-    api_key: Optional[str] = None,
-    model: str = "claude-haiku-4-5-20251001",
+    model: str = "llama-3.3-70b-versatile",
 ) -> AdvisorResult:
     """
     Run the agentic workflow and return an AdvisorResult.
@@ -133,20 +134,18 @@ def get_care_advice(
     Args:
         owner_data: Dict representation of the Owner (matches Owner.to_dict()).
         user_question: Optional free-text question from the user.
-        api_key: Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
-        model: Claude model ID to use.
+        model: Groq model ID to use.
 
     Returns:
         AdvisorResult with advice, confidence, and guardrail flag.
 
     Raises:
-        ValueError: If the API key is missing or the response is malformed.
+        ValueError: If the API key is missing.
     """
-    resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-    if not resolved_key:
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
         raise ValueError(
-            "No Anthropic API key found. Set ANTHROPIC_API_KEY environment variable "
-            "or pass api_key= to get_care_advice()."
+            "No Groq API key found. Add GROQ_API_KEY=your_key to the .env file."
         )
 
     context = _build_context(owner_data)
@@ -154,18 +153,20 @@ def get_care_advice(
     if user_question:
         user_content += f"\n\nAdditional question from the owner: {user_question}"
 
-    logger.info("Calling Claude model %s for pet care advice", model)
+    logger.info("Calling Groq model %s for pet care advice", model)
 
-    client = anthropic.Anthropic(api_key=resolved_key)
-
-    message = client.messages.create(
+    client = Groq(api_key=api_key)
+    completion = client.chat.completions.create(
         model=model,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
         max_tokens=512,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_content}],
+        temperature=0.3,
     )
 
-    raw_text = message.content[0].text
+    raw_text = completion.choices[0].message.content
     logger.debug("Raw model response: %s", raw_text)
 
     try:

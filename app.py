@@ -1,5 +1,3 @@
-import os
-
 import streamlit as st
 
 from ai_advisor import AdvisorResult, get_care_advice
@@ -318,15 +316,8 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("AI Advisor")
     st.caption(
-        "Ask Claude to review your pet's schedule and suggest improvements. "
+        "Ask the AI to review your pet's schedule and suggest improvements. "
         "Advice includes a confidence score and a guardrail flag."
-    )
-
-    api_key_input = st.text_input(
-        "Anthropic API Key",
-        type="password",
-        value=os.environ.get("ANTHROPIC_API_KEY", ""),
-        help="Your key is never stored. It is used only for this request.",
     )
 
     user_question = st.text_area(
@@ -338,15 +329,12 @@ with tabs[2]:
     if st.button("Get AI Advice"):
         if not st.session_state.owner.pets:
             st.warning("Add at least one pet and some tasks before asking for advice.")
-        elif not api_key_input.strip():
-            st.error("Please enter your Anthropic API key above.")
         else:
-            with st.spinner("Asking Claude for care advice..."):
+            with st.spinner("Asking Groq for care advice..."):
                 try:
                     result: AdvisorResult = get_care_advice(
                         owner_data=st.session_state.owner.to_dict(),
                         user_question=user_question.strip() or None,
-                        api_key=api_key_input.strip(),
                     )
                 except ValueError as exc:
                     st.error(f"Could not reach the AI advisor: {exc}")
@@ -380,8 +368,8 @@ with tabs[2]:
 
     st.divider()
     st.markdown(
-        "**How it works:** The AI Advisor sends your pet schedule to Claude, which identifies "
-        "care gaps and returns structured suggestions with a self-rated confidence score. "
+        "**How it works:** The AI Advisor sends your pet schedule to a Groq-hosted LLM, which "
+        "identifies care gaps and returns structured suggestions with a self-rated confidence score. "
         "A guardrail layer validates the response format and flags unsafe or incomplete advice "
         "before it reaches you."
     )

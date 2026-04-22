@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 from pathlib import Path
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -246,13 +247,15 @@ def _make_owner_dict(with_tasks: bool = True) -> dict:
     return owner.to_dict()
 
 
-def _mock_anthropic_response(json_payload: dict) -> MagicMock:
-    """Build a fake anthropic Messages response object."""
-    content_block = MagicMock()
-    content_block.text = json.dumps(json_payload)
+def _mock_groq_response(json_payload: dict) -> MagicMock:
+    """Build a fake Groq chat completion object."""
     message = MagicMock()
-    message.content = [content_block]
-    return message
+    message.content = json.dumps(json_payload)
+    choice = MagicMock()
+    choice.message = message
+    completion = MagicMock()
+    completion.choices = [choice]
+    return completion
 
 
 def test_build_context_includes_owner_name() -> None:
@@ -319,8 +322,10 @@ def test_parse_response_out_of_range_confidence_raises() -> None:
 
 def test_get_care_advice_missing_api_key_raises() -> None:
     owner_data = _make_owner_dict()
-    with pytest.raises(ValueError, match="API key"):
-        get_care_advice(owner_data=owner_data, api_key="")
+    with patch.dict(os.environ, {}, clear=True):
+        os.environ.pop("GROQ_API_KEY", None)
+        with pytest.raises(ValueError, match="API key"):
+            get_care_advice(owner_data=owner_data)
 
 
 def test_get_care_advice_returns_advisor_result() -> None:
@@ -334,13 +339,14 @@ def test_get_care_advice_returns_advisor_result() -> None:
         "confidence": 0.88,
         "flag": "none",
     }
-    fake_message = _mock_anthropic_response(fake_response_payload)
+    fake_completion = _mock_groq_response(fake_response_payload)
 
-    with patch("ai_advisor.anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = fake_message
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test-key-abc"}):
+        with patch("ai_advisor.Groq") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.chat.completions.create.return_value = fake_completion
 
-        result = get_care_advice(owner_data=owner_data, api_key="test-key-abc")
+            result = get_care_advice(owner_data=owner_data)
 
     assert isinstance(result, AdvisorResult)
     assert result.confidence == 0.88
@@ -352,16 +358,19 @@ def test_get_care_advice_returns_advisor_result() -> None:
 
 def test_get_care_advice_guardrail_on_bad_response() -> None:
     owner_data = _make_owner_dict()
-    bad_content = MagicMock()
-    bad_content.text = "Sorry, I cannot help with that."
     bad_message = MagicMock()
-    bad_message.content = [bad_content]
+    bad_message.content = "Sorry, I cannot help with that."
+    bad_choice = MagicMock()
+    bad_choice.message = bad_message
+    bad_completion = MagicMock()
+    bad_completion.choices = [bad_choice]
 
-    with patch("ai_advisor.anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = bad_message
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test-key-abc"}):
+        with patch("ai_advisor.Groq") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.chat.completions.create.return_value = bad_completion
 
-        result = get_care_advice(owner_data=owner_data, api_key="test-key-abc")
+            result = get_care_advice(owner_data=owner_data)
 
     assert result.flag == "incomplete_data"
     assert result.confidence == 0.0
@@ -388,19 +397,20 @@ def test_get_care_advice_passes_user_question() -> None:
         "confidence": 0.75,
         "flag": "none",
     }
-    fake_message = _mock_anthropic_response(fake_response_payload)
+    fake_completion = _mock_groq_response(fake_response_payload)
 
-    with patch("ai_advisor.anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = fake_message
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test-key-abc"}):
+        with patch("ai_advisor.Groq") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.chat.completions.create.return_value = fake_completion
 
-        result = get_care_advice(
-            owner_data=owner_data,
-            user_question="Is Mochi being fed enough?",
-            api_key="test-key-abc",
-        )
+            result = get_care_advice(
+                owner_data=owner_data,
+                user_question="Is Mochi being fed enough?",
+            )
 
-    call_kwargs = mock_instance.messages.create.call_args
-    user_message = call_kwargs[1]["messages"][0]["content"]
+    call_kwargs = mock_instance.chat.completions.create.call_args
+    messages = call_kwargs[1]["messages"]
+    user_message = messages[1]["content"]
     assert "Is Mochi being fed enough?" in user_message
     assert result.confidence == 0.75
