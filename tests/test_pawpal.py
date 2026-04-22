@@ -1,10 +1,17 @@
+import json
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ai_advisor import AdvisorResult, _build_context, _parse_response, get_care_advice
 from pawpal_system import Owner, Pet, Scheduler, Task
 
+
+# ------------------------------------------------------------------ #
+#  Core scheduler tests (unchanged from Module 2/3)                   #
+# ------------------------------------------------------------------ #
 
 def test_task_completion_changes_status() -> None:
     task = Task(description="Morning walk", time="08:00", frequency="daily")
@@ -223,3 +230,177 @@ def test_owner_save_and_load_json_round_trip(tmp_path: Path) -> None:
     assert restored.pets[0].name == "Mochi"
     assert len(restored.pets[0].tasks) == 1
     assert restored.pets[0].tasks[0].priority == "high"
+
+
+# ------------------------------------------------------------------ #
+#  AI Advisor tests                                                    #
+# ------------------------------------------------------------------ #
+
+def _make_owner_dict(with_tasks: bool = True) -> dict:
+    owner = Owner(name="Jordan", daily_time_available=120, preferred_task_types=["walk"])
+    pet = Pet(name="Mochi", species="dog", care_notes="Energetic, needs daily exercise")
+    if with_tasks:
+        pet.add_task(Task(description="Morning walk", time="08:00", frequency="daily", duration_minutes=30, priority="high"))
+        pet.add_task(Task(description="Lunch feed", time="12:00", frequency="daily", duration_minutes=15, priority="medium"))
+    owner.add_pet(pet)
+    return owner.to_dict()
+
+
+def _mock_anthropic_response(json_payload: dict) -> MagicMock:
+    """Build a fake anthropic Messages response object."""
+    content_block = MagicMock()
+    content_block.text = json.dumps(json_payload)
+    message = MagicMock()
+    message.content = [content_block]
+    return message
+
+
+def test_build_context_includes_owner_name() -> None:
+    owner_data = _make_owner_dict()
+    context = _build_context(owner_data)
+    assert "Jordan" in context
+    assert "Mochi" in context
+    assert "Morning walk" in context
+
+
+def test_build_context_with_no_pets() -> None:
+    owner = Owner(name="Sam")
+    context = _build_context(owner.to_dict())
+    assert "Sam" in context
+    assert "none registered" in context
+
+
+def test_parse_response_valid_json() -> None:
+    payload = {
+        "summary": "Schedule looks good overall.",
+        "suggestions": ["Add an evening walk.", "Consider a weekly vet check."],
+        "confidence": 0.85,
+        "flag": "none",
+    }
+    result = _parse_response(json.dumps(payload))
+    assert result["confidence"] == 0.85
+    assert result["flag"] == "none"
+    assert len(result["suggestions"]) == 2
+
+
+def test_parse_response_strips_markdown_fences() -> None:
+    payload = {
+        "summary": "Good schedule.",
+        "suggestions": ["Walk more."],
+        "confidence": 0.7,
+        "flag": "none",
+    }
+    wrapped = f"```json\n{json.dumps(payload)}\n```"
+    result = _parse_response(wrapped)
+    assert result["summary"] == "Good schedule."
+
+
+def test_parse_response_invalid_json_raises() -> None:
+    with pytest.raises(ValueError, match="non-JSON"):
+        _parse_response("This is not JSON at all.")
+
+
+def test_parse_response_missing_key_raises() -> None:
+    incomplete = json.dumps({"summary": "ok", "confidence": 0.5})
+    with pytest.raises(ValueError, match="missing keys"):
+        _parse_response(incomplete)
+
+
+def test_parse_response_out_of_range_confidence_raises() -> None:
+    payload = {
+        "summary": "ok",
+        "suggestions": ["do something"],
+        "confidence": 1.5,
+        "flag": "none",
+    }
+    with pytest.raises(ValueError, match="confidence"):
+        _parse_response(json.dumps(payload))
+
+
+def test_get_care_advice_missing_api_key_raises() -> None:
+    owner_data = _make_owner_dict()
+    with pytest.raises(ValueError, match="API key"):
+        get_care_advice(owner_data=owner_data, api_key="")
+
+
+def test_get_care_advice_returns_advisor_result() -> None:
+    owner_data = _make_owner_dict()
+    fake_response_payload = {
+        "summary": "Mochi has a consistent morning routine.",
+        "suggestions": [
+            "Add an evening walk for extra enrichment.",
+            "Include a dental care task weekly.",
+        ],
+        "confidence": 0.88,
+        "flag": "none",
+    }
+    fake_message = _mock_anthropic_response(fake_response_payload)
+
+    with patch("ai_advisor.anthropic.Anthropic") as MockClient:
+        mock_instance = MockClient.return_value
+        mock_instance.messages.create.return_value = fake_message
+
+        result = get_care_advice(owner_data=owner_data, api_key="test-key-abc")
+
+    assert isinstance(result, AdvisorResult)
+    assert result.confidence == 0.88
+    assert result.flag == "none"
+    assert result.is_safe is True
+    assert len(result.suggestions) == 2
+    assert "Mochi" in result.summary
+
+
+def test_get_care_advice_guardrail_on_bad_response() -> None:
+    owner_data = _make_owner_dict()
+    bad_content = MagicMock()
+    bad_content.text = "Sorry, I cannot help with that."
+    bad_message = MagicMock()
+    bad_message.content = [bad_content]
+
+    with patch("ai_advisor.anthropic.Anthropic") as MockClient:
+        mock_instance = MockClient.return_value
+        mock_instance.messages.create.return_value = bad_message
+
+        result = get_care_advice(owner_data=owner_data, api_key="test-key-abc")
+
+    assert result.flag == "incomplete_data"
+    assert result.confidence == 0.0
+    assert result.is_safe is False
+
+
+def test_advisor_result_is_safe_property() -> None:
+    safe = AdvisorResult(
+        summary="ok", suggestions=["s1"], confidence=0.9, flag="none", raw_response=""
+    )
+    assert safe.is_safe is True
+
+    unsafe = AdvisorResult(
+        summary="problem", suggestions=["s1"], confidence=0.4, flag="missing_vet", raw_response=""
+    )
+    assert unsafe.is_safe is False
+
+
+def test_get_care_advice_passes_user_question() -> None:
+    owner_data = _make_owner_dict()
+    fake_response_payload = {
+        "summary": "Feeding schedule looks adequate.",
+        "suggestions": ["Consider puzzle feeders.", "Add a midday play session."],
+        "confidence": 0.75,
+        "flag": "none",
+    }
+    fake_message = _mock_anthropic_response(fake_response_payload)
+
+    with patch("ai_advisor.anthropic.Anthropic") as MockClient:
+        mock_instance = MockClient.return_value
+        mock_instance.messages.create.return_value = fake_message
+
+        result = get_care_advice(
+            owner_data=owner_data,
+            user_question="Is Mochi being fed enough?",
+            api_key="test-key-abc",
+        )
+
+    call_kwargs = mock_instance.messages.create.call_args
+    user_message = call_kwargs[1]["messages"][0]["content"]
+    assert "Is Mochi being fed enough?" in user_message
+    assert result.confidence == 0.75
