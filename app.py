@@ -118,7 +118,8 @@ with st.sidebar:
 # ------------------------------------------------------------------ #
 #  Main area                                                           #
 # ------------------------------------------------------------------ #
-st.header(f"PawPal+ — {active_owner().name}")
+st.header(f"PawPal+")
+st.header(f"Active Owner - {active_owner().name}")
 tabs = st.tabs(["Pets and Tasks", "Health Log", "Build Schedule", "AI Advisor"])
 
 
@@ -528,6 +529,12 @@ with tabs[3]:
                 for i, suggestion in enumerate(result.suggestions, start=1):
                     st.markdown(f"{i}. {suggestion}")
 
+                if result.retrieved_docs:
+                    with st.expander(f"Retrieved Knowledge ({len(result.retrieved_docs)} chunks from vector DB)"):
+                        st.caption("These knowledge snippets were retrieved from the local vector store and used to ground the AI's advice.")
+                        for k, doc in enumerate(result.retrieved_docs, 1):
+                            st.markdown(f"**{k}.** {doc}")
+
                 with st.expander("Raw JSON response"):
                     st.code(result.raw_response, language="json")
 
@@ -549,8 +556,10 @@ with tabs[3]:
 
     st.divider()
     st.markdown(
-        "**How it works:** The AI Advisor sends the selected owner's pet schedule to a "
-        "Groq-hosted LLM, which identifies care gaps and returns structured suggestions "
-        "with a self-rated confidence score. A guardrail layer validates the response "
-        "format and flags unsafe or incomplete advice before it reaches you."
+        "**How it works:** Before calling the LLM, the AI Advisor queries a local ChromaDB "
+        "vector store of pet care knowledge (exercise, nutrition, vaccination, scheduling). "
+        "The most relevant chunks are retrieved based on your pets' species and question, "
+        "then injected into the prompt as grounded context. The LLM uses this knowledge "
+        "to produce structured suggestions with a self-rated confidence score. "
+        "A guardrail layer validates the response format before it reaches you."
     )

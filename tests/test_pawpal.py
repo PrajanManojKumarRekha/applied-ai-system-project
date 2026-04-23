@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ai_advisor import AdvisorResult, _build_context, _parse_response, get_care_advice
+from ai_advisor import AdvisorResult, _build_context, _build_retrieval_query, _extract_species, _parse_response, get_care_advice
 from pawpal_system import Owner, Pet, Scheduler, Task
 
 
@@ -379,12 +379,12 @@ def test_get_care_advice_guardrail_on_bad_response() -> None:
 
 def test_advisor_result_is_safe_property() -> None:
     safe = AdvisorResult(
-        summary="ok", suggestions=["s1"], confidence=0.9, flag="none", raw_response=""
+        summary="ok", suggestions=["s1"], confidence=0.9, flag="none", raw_response="", retrieved_docs=[]
     )
     assert safe.is_safe is True
 
     unsafe = AdvisorResult(
-        summary="problem", suggestions=["s1"], confidence=0.4, flag="missing_vet", raw_response=""
+        summary="problem", suggestions=["s1"], confidence=0.4, flag="missing_vet", raw_response="", retrieved_docs=[]
     )
     assert unsafe.is_safe is False
 
@@ -414,3 +414,105 @@ def test_get_care_advice_passes_user_question() -> None:
     user_message = messages[1]["content"]
     assert "Is Mochi being fed enough?" in user_message
     assert result.confidence == 0.75
+
+
+# ------------------------------------------------------------------ #
+#  Agentic RAG tests                                                   #
+# ------------------------------------------------------------------ #
+
+def test_extract_species_returns_unique_list() -> None:
+    owner_data = _make_owner_dict()
+    species = _extract_species(owner_data)
+    assert "dog" in species
+    assert len(species) == len(set(species))
+
+
+def test_extract_species_empty_when_no_pets() -> None:
+    owner = Owner(name="Sam")
+    species = _extract_species(owner.to_dict())
+    assert species == []
+
+
+def test_build_retrieval_query_includes_species_and_question() -> None:
+    owner_data = _make_owner_dict()
+    query = _build_retrieval_query(owner_data, "Does Mochi need more walks?")
+    assert "dog" in query
+    assert "Does Mochi need more walks?" in query
+
+
+def test_build_retrieval_query_uses_defaults_when_no_question() -> None:
+    owner_data = _make_owner_dict()
+    query = _build_retrieval_query(owner_data, None)
+    assert "dog" in query
+    assert len(query) > 5
+
+
+def test_get_care_advice_injects_retrieved_knowledge_into_prompt() -> None:
+    owner_data = _make_owner_dict()
+    fake_response_payload = {
+        "summary": "Mochi needs more enrichment.",
+        "suggestions": ["Add puzzle feeders.", "Evening walk recommended."],
+        "confidence": 0.80,
+        "flag": "none",
+    }
+    fake_completion = _mock_groq_response(fake_response_payload)
+    fake_docs = ["Dogs need 30-60 min exercise daily.", "Puzzle feeders support mental enrichment."]
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test-key-abc"}):
+        with patch("ai_advisor.Groq") as MockClient:
+            with patch("ai_advisor.retrieve", return_value=fake_docs):
+                mock_instance = MockClient.return_value
+                mock_instance.chat.completions.create.return_value = fake_completion
+
+                result = get_care_advice(owner_data=owner_data, user_question="Is Mochi active enough?")
+
+    call_kwargs = mock_instance.chat.completions.create.call_args
+    user_msg = call_kwargs[1]["messages"][1]["content"]
+    assert "RETRIEVED KNOWLEDGE" in user_msg
+    assert "Dogs need 30-60 min exercise daily." in user_msg
+    assert result.retrieved_docs == fake_docs
+
+
+def test_get_care_advice_stores_retrieved_docs_on_result() -> None:
+    owner_data = _make_owner_dict()
+    fake_response_payload = {
+        "summary": "Schedule looks good.",
+        "suggestions": ["Keep consistent feeding times."],
+        "confidence": 0.85,
+        "flag": "none",
+    }
+    fake_completion = _mock_groq_response(fake_response_payload)
+    fake_docs = ["Consistent schedules reduce pet anxiety."]
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test-key-abc"}):
+        with patch("ai_advisor.Groq") as MockClient:
+            with patch("ai_advisor.retrieve", return_value=fake_docs):
+                mock_instance = MockClient.return_value
+                mock_instance.chat.completions.create.return_value = fake_completion
+
+                result = get_care_advice(owner_data=owner_data, user_question="How is the schedule?")
+
+    assert result.retrieved_docs == fake_docs
+    assert len(result.retrieved_docs) == 1
+
+
+def test_get_care_advice_handles_empty_retrieval_gracefully() -> None:
+    owner_data = _make_owner_dict()
+    fake_response_payload = {
+        "summary": "Schedule looks reasonable.",
+        "suggestions": ["Add a vet visit."],
+        "confidence": 0.65,
+        "flag": "missing_vet",
+    }
+    fake_completion = _mock_groq_response(fake_response_payload)
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test-key-abc"}):
+        with patch("ai_advisor.Groq") as MockClient:
+            with patch("ai_advisor.retrieve", return_value=[]):
+                mock_instance = MockClient.return_value
+                mock_instance.chat.completions.create.return_value = fake_completion
+
+                result = get_care_advice(owner_data=owner_data, user_question="Anything missing?")
+
+    assert result.retrieved_docs == []
+    assert result.flag == "missing_vet"
