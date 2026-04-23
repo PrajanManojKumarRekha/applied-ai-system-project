@@ -1,35 +1,44 @@
 """
-PawPal+ AI Advisor
-Agentic workflow that analyzes a pet owner's schedule and returns structured
-care advice with a confidence score and guardrail filtering.
+PawPal+ AI Advisor — Agentic RAG Workflow
 
-Steps in the workflow:
-  1. Load the Groq API key from the .env file.
-  2. Build a context summary from owner/pet/task data.
-  3. Call a Groq-hosted model to produce a structured JSON response.
-  4. Validate the response format (guardrail).
-  5. Return a typed AdvisorResult to the caller.
+Steps in the agentic workflow:
+  1. Load the Groq API key from .env.
+  2. Identify the species present in the owner's data.
+  3. Build a retrieval query from species + user question (RAG step).
+  4. Query the ChromaDB vector store for relevant pet care knowledge.
+  5. Build a context summary from owner/pet/task data.
+  6. Inject retrieved knowledge into the prompt as grounded context.
+  7. Call the Groq LLM to produce a structured JSON response.
+  8. Validate the response format (guardrail).
+  9. Return a typed AdvisorResult with retrieved_docs attached.
 """
 
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 from groq import Groq
 
+from rag_knowledge import retrieve
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """You are PawPal+ AI Advisor, a helpful pet care assistant.
+_SYSTEM_PROMPT = """You are PawPal+ AI Advisor, a knowledgeable pet care assistant.
 
-You receive a summary of a pet owner's pets and scheduled tasks. Your job is to:
-1. Review the schedule for gaps, imbalances, or risky patterns.
-2. Suggest 2 to 3 concrete, actionable improvements.
-3. Rate your own confidence in the advice from 0.0 to 1.0.
+You receive two inputs:
+1. RETRIEVED KNOWLEDGE: relevant pet care facts pulled from a trusted knowledge base.
+2. OWNER DATA: the current pet owner's pets, tasks, and schedule.
+
+Your job is to:
+1. Use the retrieved knowledge to ground your advice in established best practices.
+2. Review the schedule for gaps, imbalances, or risky patterns.
+3. Suggest 2 to 3 concrete, actionable improvements based on both the knowledge and the data.
+4. Rate your own confidence in the advice from 0.0 to 1.0.
 
 Respond ONLY with a valid JSON object that matches this schema exactly:
 {
@@ -41,8 +50,9 @@ Respond ONLY with a valid JSON object that matches this schema exactly:
 
 Rules:
 - Never recommend specific medications or medical dosages.
-- If the schedule looks dangerous or the data is too sparse to advise safely, set flag to the relevant value.
-- Keep each suggestion under 30 words.
+- Ground suggestions in the retrieved knowledge when relevant.
+- If the schedule looks dangerous or the data is too sparse to advise safely, set flag accordingly.
+- Keep each suggestion under 35 words.
 - Do not include any text outside the JSON object.
 """
 
@@ -54,10 +64,32 @@ class AdvisorResult:
     confidence: float
     flag: str
     raw_response: str
+    retrieved_docs: list[str] = field(default_factory=list)
 
     @property
     def is_safe(self) -> bool:
         return self.flag == "none"
+
+
+def _extract_species(owner_data: dict[str, Any]) -> list[str]:
+    species = []
+    for pet in owner_data.get("pets", []):
+        s = pet.get("species", "").lower().strip()
+        if s and s not in species:
+            species.append(s)
+    return species
+
+
+def _build_retrieval_query(owner_data: dict[str, Any], user_question: Optional[str]) -> str:
+    species = _extract_species(owner_data)
+    parts = []
+    if species:
+        parts.append(f"Pet care for {', '.join(species)}")
+    if user_question:
+        parts.append(user_question)
+    else:
+        parts.append("exercise, feeding, vaccination, and scheduling best practices")
+    return ". ".join(parts)
 
 
 def _build_context(owner_data: dict[str, Any]) -> str:
@@ -128,16 +160,15 @@ def get_care_advice(
     user_question: Optional[str] = None,
     model: str = "llama-3.3-70b-versatile",
 ) -> AdvisorResult:
-    """
-    Run the agentic workflow and return an AdvisorResult.
+    """Run the agentic RAG workflow and return an AdvisorResult.
 
     Args:
         owner_data: Dict representation of the Owner (matches Owner.to_dict()).
-        user_question: Optional free-text question from the user.
+        user_question: Free-text question from the user.
         model: Groq model ID to use.
 
     Returns:
-        AdvisorResult with advice, confidence, and guardrail flag.
+        AdvisorResult with advice, confidence, guardrail flag, and retrieved docs.
 
     Raises:
         ValueError: If the API key is missing.
@@ -148,10 +179,27 @@ def get_care_advice(
             "No Groq API key found. Add GROQ_API_KEY=your_key to the .env file."
         )
 
+    # Step 1: Identify species for targeted retrieval
+    species = _extract_species(owner_data)
+    logger.info("RAG: detected species %s", species)
+
+    # Step 2: Build retrieval query and fetch relevant knowledge
+    retrieval_query = _build_retrieval_query(owner_data, user_question)
+    logger.info("RAG: querying vector store with: %s", retrieval_query[:80])
+    docs = retrieve(query=retrieval_query, species_filter=species, n_results=4)
+    logger.info("RAG: retrieved %d knowledge chunks", len(docs))
+
+    # Step 3: Build owner context
     context = _build_context(owner_data)
-    user_content = f"Here is the pet owner's current data:\n\n{context}"
+
+    # Step 4: Compose the full user message with retrieved knowledge injected
+    knowledge_block = "\n\n".join(f"- {doc}" for doc in docs) if docs else "No specific knowledge retrieved."
+    user_content = (
+        f"RETRIEVED KNOWLEDGE:\n{knowledge_block}\n\n"
+        f"OWNER DATA:\n{context}"
+    )
     if user_question:
-        user_content += f"\n\nAdditional question from the owner: {user_question}"
+        user_content += f"\n\nQuestion from the owner: {user_question}"
 
     logger.info("Calling Groq model %s for pet care advice", model)
 
@@ -179,6 +227,7 @@ def get_care_advice(
             confidence=0.0,
             flag="incomplete_data",
             raw_response=raw_text,
+            retrieved_docs=docs,
         )
 
     result = AdvisorResult(
@@ -187,6 +236,7 @@ def get_care_advice(
         confidence=parsed["confidence"],
         flag=parsed["flag"],
         raw_response=raw_text,
+        retrieved_docs=docs,
     )
     logger.info("Advice generated. Confidence=%.2f Flag=%s", result.confidence, result.flag)
     return result
