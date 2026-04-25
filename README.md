@@ -100,6 +100,8 @@ flowchart TD
     FB --> OUT
 ```
 
+![Architecture Diagram](Mermaid.png)
+
 ## Setup Instructions
 
 ### Prerequisites
