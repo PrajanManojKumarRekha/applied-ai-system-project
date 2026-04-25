@@ -131,51 +131,73 @@ with tabs[0]:
 
     # Owner settings
     st.subheader("Owner Settings")
-    new_owner_display_name = st.text_input("Owner Name", value=owner.name, key="owner_name_input")
-    if new_owner_display_name.strip() and new_owner_display_name.strip() != owner.name:
-        owner.name = new_owner_display_name.strip()
-        save_all()
 
-    daily_minutes = st.number_input(
-        "Daily Time Available (Minutes)",
-        min_value=30,
-        max_value=1440,
-        step=1,
-        value=owner.daily_time_available,
-        key="daily_minutes_ui",
-    )
-    if owner.daily_time_available != int(daily_minutes):
-        owner.set_daily_time_available(int(daily_minutes))
-        save_all()
+    owner_key = f"owner_{st.session_state.active_owner_index}"
+    with st.form(f"owner_settings_form_{owner_key}"):
+        new_owner_display_name = st.text_input(
+            "Owner Name",
+            value=owner.name,
+            key=f"owner_name_input_{owner_key}",
+        )
+        daily_minutes = st.number_input(
+            "Daily Time Available (Minutes)",
+            min_value=30,
+            max_value=1440,
+            step=1,
+            value=owner.daily_time_available,
+            key=f"daily_minutes_ui_{owner_key}",
+        )
+        preferences_text = st.text_input(
+            "Preferred Task Keywords (Comma Separated)",
+            value=", ".join(owner.preferred_task_types),
+            key=f"preferences_input_{owner_key}",
+        )
+        save_settings_btn = st.form_submit_button("Save Settings")
 
-    preferences_text = st.text_input(
-        "Preferred Task Keywords (Comma Separated)",
-        value=", ".join(owner.preferred_task_types),
-        key="preferences_input",
-    )
-    parsed_prefs = [p.strip() for p in preferences_text.split(",") if p.strip()]
-    if parsed_prefs != owner.preferred_task_types:
-        owner.set_preferences(parsed_prefs)
-        save_all()
+    if save_settings_btn:
+        changed = False
+        clean_name = new_owner_display_name.strip()
+        if clean_name and clean_name != owner.name:
+            owner.name = clean_name
+            changed = True
+        new_minutes = int(daily_minutes)
+        if owner.daily_time_available != new_minutes:
+            owner.set_daily_time_available(new_minutes)
+            changed = True
+        parsed_prefs = [p.strip() for p in preferences_text.split(",") if p.strip()]
+        if parsed_prefs != owner.preferred_task_types:
+            owner.set_preferences(parsed_prefs)
+            changed = True
+        if changed:
+            save_all()
+            st.success("Settings saved.")
+            st.rerun()
 
     st.divider()
     st.subheader(f"Add a Pet for {owner.name}")
 
+
     with st.form("add_pet_form", clear_on_submit=True):
-        pet_name_input = st.text_input("Pet Name")
-        species_input = st.selectbox("Species", ["dog", "cat", "bird", "rabbit", "other"])
-        care_notes_input = st.text_input("Care Notes", value="")
+        pet_name_input = st.text_input("Pet Name", key="pet_name_input")
+        species_options = ["dog", "cat", "bird", "rabbit", "other"]
+        species_input = st.selectbox("Species", species_options, key="species_select")
+        custom_species = st.text_input("Other Species (if applicable)", key="custom_species_input")
+        care_notes_input = st.text_input("Care Notes", value="", key="care_notes_input")
         add_pet_btn = st.form_submit_button("Add Pet")
 
     if add_pet_btn:
         clean = pet_name_input.strip()
         if not clean:
             st.error("Please enter a pet name.")
+        elif species_input == "other" and not custom_species.strip():
+            st.error("Please enter a custom species in the 'Other Species' field.")
         else:
             try:
-                owner.add_pet(Pet(name=clean, species=species_input, care_notes=care_notes_input.strip()))
+                final_species = custom_species.strip() if species_input == "other" else species_input
+                owner.add_pet(Pet(name=clean, species=final_species, care_notes=care_notes_input.strip()))
                 st.success(f"Added {clean} to {owner.name}.")
                 save_all()
+                st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
 
@@ -211,6 +233,32 @@ with tabs[0]:
         } for p in owner.pets])
     else:
         st.info(f"{owner.name} has no pets yet.")
+
+
+    # --- Delete Pet Feature ---
+    st.divider()
+    st.subheader(f"Delete a Pet for {owner.name}")
+    if owner.pets:
+        pet_labels = [f"{p.name} ({p.species})" for p in owner.pets]
+        with st.form("delete_pet_form"):
+            del_pet_idx = st.selectbox(
+                "Select Pet to Delete",
+                list(range(len(owner.pets))),
+                format_func=lambda i: pet_labels[i],
+                key=f"delete_pet_select_{st.session_state.active_owner_index}",
+            )
+            del_pet_btn = st.form_submit_button("Delete Pet", type="secondary")
+        if del_pet_btn:
+            if 0 <= del_pet_idx < len(owner.pets):
+                deleted_pet = owner.pets[del_pet_idx]
+                owner.pets.pop(del_pet_idx)
+                save_all()
+                st.success(f"Deleted pet '{deleted_pet.name}' from {owner.name}.")
+                st.rerun()
+            else:
+                st.error("Pet not found.")
+    else:
+        st.info(f"No pets to delete for {owner.name}.")
 
     st.divider()
     st.subheader(f"Add a Task for {owner.name}'s Pets")
