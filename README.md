@@ -44,92 +44,60 @@ The confidence score is shown in the UI so the owner can judge how much weight t
 
 ## System Architecture
 
-```
- User Input (browser)
-        |
-        v
-+-----------------------------------------------+
-|           Streamlit App (app.py)               |
-|                                               |
-|  Sidebar                                      |
-|    Owner switcher, Add/Delete Owner           |
-|    Stats: pets, tasks, rate, streaks          |
-|                                               |
-|  Tab 1: Pets and Tasks                        |
-|    Owner Settings (form, explicit save)       |
-|    Add Pet / Delete Pet (form-based)          |
-|    Add Task (form, time-input, priority)      |
-|    Filter by pet / status / priority          |
-|    Mark Complete / Mark Pending               |
-|            |                                  |
-|            v                                  |
-|    pawpal_system.py <--> owners.json          |
-|    (Owner, Pet, Task, HealthRecord)           |
-|                                               |
-|  Tab 2: Health Log                            |
-|    Add health record per pet                  |
-|    View records sorted newest-first           |
-|            |                                  |
-|            v                                  |
-|    pawpal_system.py <--> owners.json          |
-|                                               |
-|  Tab 3: Build Schedule                        |
-|    get_todays_schedule()                      |
-|    build_daily_plan()  (priority + budget)    |
-|    detect_conflicts()                         |
-|    next_available_slot()                      |
-|    export_schedule_text() -> .txt download    |
-|                                               |
-|  Tab 4: AI Advisor                            |
-|    User question + owner/pet/task data        |
-|            |                                  |
-+------------|----------------------------------+
-             |
-             v
-    [ ai_advisor.py ]
-    Step 1: load GROQ_API_KEY from .env
-    Step 2: extract species from owner data
-    Step 3: build retrieval query
-             |
-             v
-    [ rag_knowledge.py ]
-    ChromaDB vector store (./chroma_db/)
-    20 knowledge docs, cosine similarity
-    filter by species + "general"
-             |
-             v  top-4 retrieved chunks
-    Step 5: build owner context string
-    Step 6: inject knowledge into prompt
-             |
-             v
-    [ Groq API ]
-    llama-3.3-70b-versatile
-    system prompt enforces JSON schema
-             |
-             v
-    [ _parse_response() guardrail ]
-    validates keys, confidence, flag
-    strips markdown fences
-             |
-        +----+----+
-        |         |
-      valid    invalid
-        |         |
-        v         v
-  AdvisorResult  safe fallback
-  summary        confidence=0.0
-  suggestions    flag=incomplete_data
-  confidence
-  flag
-  retrieved_docs
-        |
-        v
-    UI output:
-    confidence metric, flag metric
-    summary, numbered suggestions
-    Retrieved Knowledge expander
-    Raw JSON expander
-    Advice history (last 3 runs)
+```mermaid
+flowchart TD
+    User(["User (Browser)"])
+
+    subgraph APP["Streamlit App — app.py"]
+        direction TB
+        Sidebar["Sidebar\nOwner switcher · Add/Delete Owner\nStats: pets, tasks, rate, streaks"]
+
+        subgraph TAB1["Tab 1: Pets and Tasks"]
+            T1["Owner Settings\nAdd Pet / Delete Pet\nAdd Task\nFilter · Mark Complete/Pending"]
+        end
+
+        subgraph TAB2["Tab 2: Health Log"]
+            T2["Add health record\nView records (newest-first)"]
+        end
+
+        subgraph TAB3["Tab 3: Build Schedule"]
+            T3["get_todays_schedule()\nbuild_daily_plan()\ndetect_conflicts()\nnext_available_slot()\nexport_schedule_text()"]
+        end
+
+        subgraph TAB4["Tab 4: AI Advisor"]
+            T4["User question\n+ owner / pet / task data"]
+        end
+    end
+
+    DB[("owners.json\npersistence")]
+    PS["pawpal_system.py\nOwner · Pet · Task · Scheduler\nHealthRecord"]
+
+    subgraph AIPIPE["AI Pipeline"]
+        direction TB
+        ADV["ai_advisor.py\n1 load GROQ_API_KEY\n2 extract species\n3 build retrieval query"]
+        RAG["rag_knowledge.py\nChromaDB vector store\n20 docs · cosine similarity\nfilter by species"]
+        GROQ["Groq API\nllama-3.3-70b-versatile\nJSON schema enforced"]
+        GRD{"_parse_response\nguardrail"}
+        OK["AdvisorResult\nsummary · suggestions\nconfidence · flag\nretrieved_docs"]
+        FB["Safe fallback\nconfidence = 0.0\nflag = incomplete_data"]
+    end
+
+    OUT["UI Output\nConfidence metric · Flag metric\nSummary · Suggestions\nRetrieved Knowledge expander\nRaw JSON expander\nAdvice history (last 3)"]
+
+    User --> APP
+    T1 --> PS
+    T2 --> PS
+    T3 --> PS
+    PS <--> DB
+    T4 --> ADV
+    ADV -->|"retrieval query"| RAG
+    RAG -->|"top-4 chunks"| ADV
+    ADV -->|"context + knowledge"| GROQ
+    GROQ -->|"raw JSON"| GRD
+    GRD -->|valid| OK
+    GRD -->|invalid| FB
+    OK --> OUT
+    FB --> OUT
 ```
 
 ## Setup Instructions
@@ -277,5 +245,6 @@ See [reflection.md](reflection.md) for a full reflection on AI collaboration, de
 ## Demo Screenshots
 
 ![Pets and Tasks tab](image.png)
-![Build Schedule tab](image-1.png)
-![AI Advisor tab](image-2.png)
+![Health Log tab](image1.png)
+![AI Advisor tab](image2.png)
+![Build Schedule tab](image3.png)
