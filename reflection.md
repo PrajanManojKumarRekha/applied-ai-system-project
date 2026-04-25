@@ -1,103 +1,59 @@
-# PawPal+ Project Reflection (Module 4)
+# PawPal+ Reflection
 
-## 1. System Design
+## How This Project Grew
 
-### Original Design (Modules 1 to 3)
+PawPal+ started simple. I wanted a tool that could help someone keep track of pet care tasks without losing things in a notebook or a phone note. So I built a scheduling assistant with four core classes: Owner, Pet, Task, and Scheduler. The scheduler handled sorting by time, prioritizing by urgency, detecting when two tasks conflicted, and suggesting the next open slot in the day. Everything was deterministic. Same input, same output, every time.
 
-PawPal+ started as a scheduling assistant for pet owners. The core idea was simple: help someone keep track of care tasks, build a prioritized daily plan, and avoid conflicts.
+That worked well for what it was, but it could only tell you what tasks you had, not whether those tasks were actually good for your pets. A dog owner could schedule one five-minute walk a week and the app would just show it as a task. There was no layer that could say "this is not enough for a high-energy breed."
 
-I designed four main classes: Owner, Pet, Task, and Scheduler. Owner holds the time budget and preferences. Pet holds care notes and a task list. Task holds the description, time, priority, frequency, and duration. Scheduler handles sorting, filtering, conflict detection, time slot search, and daily plan building.
+That gap pushed me toward adding an AI advisor. My first idea was simple: pass the schedule to a language model, ask for feedback. But I kept running into the same problem when testing that approach. The advice was vague. "Make sure your pet gets enough exercise" is not useful if you already know that and want to know whether 30 minutes is enough for a Border Collie specifically. The model needed to know what good care actually looks like, not just guess based on training data.
 
-The original system was entirely rule-based. It scored tasks by priority and owner preferences, sorted them by time, and produced an explainable plan. No external AI model was involved.
+That is when I switched to a retrieval-augmented approach. I built a local knowledge base of 20 curated pet care documents covering exercise needs, vaccination schedules, feeding guidelines, dental care, and scheduling best practices, all tagged by species. Before calling the LLM, the system identifies which species the owner has, retrieves the most relevant knowledge chunks from a ChromaDB vector store, and injects them into the prompt. The model then has actual facts to reason from rather than generic impressions.
 
-### Module 4 Extension
+The difference in advice quality was noticeable right away. Questions about dogs came back with breed-appropriate suggestions referencing exercise durations. Cat questions surfaced litter hygiene and vaccination reminders. The grounding was working.
 
-Module 4 asked me to add a substantial AI feature. I chose to build an agentic workflow that sends the owner's full schedule context to Claude and gets structured care advice back. This is integrated as a third tab in the Streamlit app rather than a standalone demo, so it operates on the same data the owner is already managing.
+## What I Used AI For During Development
 
-The new component is ai_advisor.py. It contains a context builder that converts the Owner dictionary into plain text, a call to the Claude API, a guardrail function that validates the response format, and a typed AdvisorResult dataclass.
+I used AI assistance at several points, but not to write code wholesale. The most useful sessions were the ones where I described a problem and asked what could go wrong.
 
-### Design Changes from Original Plan
+When I was designing the guardrail, I described the pipeline and asked what failure modes I should protect against. That conversation surfaced the full list: missing JSON keys, confidence values outside 0 to 1, invalid flag strings, and the model sometimes wrapping the JSON in markdown fences even when told not to. Every one of those became a real test case. Without that conversation I probably would have caught two or three of them and been surprised by the rest in production.
 
-I originally considered a multi-turn loop where Claude could ask clarifying questions. I dropped this because the owner's data is already fully captured in context, and adding a loop would increase complexity without improving advice quality for this scope. The single-turn design is easier to test, easier to reason about, and still produces genuinely useful output.
+I also used it to think through the knowledge base design. What topics matter most across the species I was targeting? What is specific enough to be useful but generic enough to not require per-breed data? That back and forth helped me land on the 20-document structure that covers the important cases without becoming a veterinary database.
 
----
+### One Suggestion That Helped
 
-## 2. Scheduling Logic and New AI Layer
+The best suggestion was about what to do when the guardrail fires. My instinct was to raise a `ValueError` and catch it in the Streamlit layer with a generic error message. The suggestion was to instead return a structured `AdvisorResult` with `confidence=0.0` and `flag="incomplete_data"` containing a plain-English explanation.
 
-### How the Two Systems Work Together
+That turned out to be the right call for a few reasons. The UI stays consistent because the result shape never changes regardless of what the model does. The owner gets a clear message instead of a stack trace. And the guardrail behavior is directly testable because you can write a test that checks the exact confidence and flag values on a bad response, which I did. Raising an exception would have made that test much messier.
 
-The original scheduler is deterministic. It applies fixed rules and produces the same output every time for the same input. The AI Advisor layer is probabilistic. It interprets patterns in the schedule and generates natural language suggestions that the deterministic scheduler cannot produce.
+### One Suggestion That Did Not Work
 
-Neither replaces the other. The scheduler is better for building the actual plan. The AI Advisor is better for spotting care gaps, imbalances, and missing items that are not captured in the data.
+The suggestion I did not follow was to build a multi-turn conversation loop where the model asks clarifying questions before giving advice, things like "does your dog have any health conditions?" or "how long has this task been in the schedule?"
 
-### Tradeoffs
+It sounded like it would produce more personalized advice. But it was wrong for this project for a few reasons. The app already has a care notes field per pet where the owner can put exactly that kind of context before asking. A conversation loop would require persisting the chat history across Streamlit reruns, which introduces its own session state bugs and makes the system significantly harder to test. And the retrieval step already compensates for sparse data by pulling in species-appropriate best practices. The single-turn design with strong retrieval produces specific, grounded advice without the added complexity.
 
-The main tradeoff is trust. Deterministic scheduling output is fully explainable and verifiable. AI-generated advice is plausible but could be wrong. I addressed this with three design choices. First, the system prompt restricts Claude from recommending medications or specific dosages. Second, the response schema is validated before results reach the UI. Third, a confidence score is shown so the owner can calibrate how much weight to give the advice.
+## Testing and What I Learned
 
----
+I wrote 32 automated tests covering the scheduler logic, the AI Advisor pipeline, and the RAG layer separately. The tests mock the Groq client and the vector store so they run without an API key and produce consistent results regardless of what is stored locally.
 
-## 3. AI Collaboration During Development
+The guardrail tests ended up being the most important ones. They confirmed that a model returning plain text, or JSON missing required keys, or a confidence value of 1.5 all produce a predictable safe fallback rather than an exception. That is the behavior that matters most in production.
 
-### How I Used AI
+One thing I learned while writing the tests is that you have to patch `ai_advisor.retrieve` directly, not let it hit the real ChromaDB. The first few test runs were flaky because the vector store on disk had different content depending on what I had done locally. Once I patched the retrieve function the tests became fully deterministic.
 
-I used Claude Code to help design the system prompt for the advisor and to think through the guardrail validation logic. I also used it to review the structure of the test suite and suggest edge cases I had not thought of.
+I also ran a manual end-to-end test with a real Groq API key and real pet data. The automated suite covers the shape of the system but not the quality of the advice, and that can only be evaluated by actually reading the output.
 
-The most useful interaction was when I asked for help thinking through what could go wrong with the model response. Claude suggested testing for markdown fences around JSON, out-of-range confidence values, and missing required keys. All three became real test cases that the guardrail now handles.
+## Limitations and Ethics
 
-### Helpful Suggestion
+The advisor only knows what is in the data. It cannot see whether the owner is actually doing the tasks, whether the pet is stressed, or whether a condition has gotten worse since the last vet visit. A schedule that looks fine on paper might be missing the most important thing.
 
-The most helpful suggestion was to return a safe fallback AdvisorResult instead of raising an exception when the guardrail fails. My first instinct was to let the exception propagate and catch it in the Streamlit layer. Claude pointed out that catching a ValueError in the UI creates a worse user experience than returning a graceful result with a clear explanation. The fallback result approach also made the guardrail behavior directly testable, which the exception approach would not have been.
+The confidence score is self-reported by the model, which means a high score reflects how certain the model was, not whether the advice is actually correct. I kept it in because showing uncertainty is better than hiding it, but it is not a quality guarantee.
 
-### Flawed Suggestion
+The knowledge base covers common domestic species reasonably well. Exotic animals, senior pets, and pets with chronic conditions will get generic advice because those topics are not in the 20 documents. The system is honest about this because the retrieved chunks are visible in the UI, so the owner can see when the knowledge that was retrieved does not really apply.
 
-Claude suggested I use a multi-turn conversation loop where the model could ask the user clarifying questions before generating advice. The idea was that the model could ask "does your dog have any allergies?" and then refine its suggestions based on the answer. This sounded appealing but was wrong for this project. PawPal+ already captures care notes per pet, so the owner can put that information in the data before asking for advice. Adding a multi-turn loop would require managing conversation history across Streamlit reruns, which introduces significant complexity and session state bugs. I kept the single-turn design and the advice quality did not suffer.
+The biggest misuse risk is an owner treating AI advice as a substitute for a vet. The guardrail flag system flags cases where a vet visit appears to be missing, the system prompt explicitly prohibits medication recommendations, and the confidence score is visible. But none of that stops someone who is determined to avoid the vet. I added the "Missing Vet Visit" flag specifically to surface that case rather than let the model silently produce wellness advice when the real issue is that the pet has not been seen by a professional.
 
----
+## What This Taught Me
 
-## 4. Testing and Verification
+The thing that surprised me most was that overly complete data produced worse advice than sparse data with real gaps. When every task was filled in with high priority and no conflicts existed, the model tended to say everything looked fine and produce vague suggestions. When there were actual gaps or conflicts, the suggestions were specific and actionable. The retrieval layer helped a lot here because even when the schedule data was thin, the retrieved knowledge gave the model enough context to say what was typically missing for that species.
 
-### What I Tested
-
-I wrote 25 automated tests. The first 13 cover the original scheduler and are unchanged from Module 3. The new 12 tests cover:
-
-- Context building with and without pets
-- JSON parsing for valid responses, markdown-wrapped responses, missing keys, and out-of-range confidence
-- Guardrail behavior when the model returns plain text instead of JSON
-- Missing API key validation
-- The is_safe property on AdvisorResult
-- End-to-end advice generation with a mocked Anthropic client
-- User question passthrough to the API call
-
-### Results
-
-All 25 tests pass. The guardrail tests are the most important because they confirm that a bad model response does not crash the app or show confusing output to the user.
-
-One thing I learned is that mocking the Anthropic client is straightforward but does not catch prompt engineering errors. I found one case during manual testing where the model returned valid JSON but gave advice that was too generic to be useful. The fix was to tighten the system prompt to require concrete, specific suggestions rather than abstract guidance.
-
-### Confidence
-
-My confidence level is 4 out of 5. The tested paths are solid. The gap is in real-world prompt robustness. Different model versions or unusual pet data could produce edge cases the mock tests would not catch.
-
----
-
-## 5. Limitations, Bias, and Ethics
-
-### Limitations
-
-The AI Advisor only knows what is in the schedule. It cannot observe the pet's actual behavior, health, or environment. This means it might suggest adding more tasks for a pet that is already stressed, or miss that a "daily walk" listed in the data is actually not happening.
-
-The system prompt tells Claude not to recommend medications, but it has no way to verify whether a task labeled "give meds" is safe or appropriate. The advice is general wellness guidance, not veterinary care.
-
-The confidence score is self-reported by the model. A high confidence score does not mean the advice is correct. It means the model felt certain, which is not the same thing.
-
-### Potential for Misuse
-
-A pet owner who trusts AI advice uncritically might delay a vet visit because the advisor said the schedule looks good. To reduce this risk, the flag system surfaces cases where the data suggests a vet appointment is missing. The UI also shows a note explaining that the advisor gives general guidance and is not a substitute for professional veterinary care.
-
-### What Surprised Me
-
-I expected the model to struggle with sparse data. What actually surprised me was that it struggled more with overly structured data. When every task was perfectly filled in with high priority and short duration, the model tended to say everything looked fine and give weak suggestions. When there were actual gaps or conflicts in the data, the suggestions were much more specific and useful. This suggests the advisor works best as a second opinion when the schedule has real problems, not as a final check on an already polished plan.
-
-### Key Takeaway
-
-Building this project taught me that reliability in AI systems is not just about whether the model gives good answers. It is about whether bad answers are caught before they reach the user. The guardrail and confidence score together give the owner the information they need to decide how much to trust the output. That is more useful than trying to make the model always right.
+The bigger lesson is about where reliability comes from. I went into this thinking reliability meant making the model give better answers. What I actually built was a system where bad answers are caught and handled before they reach the user. The guardrail, the confidence score, and the retrieved knowledge panel together give the owner what they need to decide how much to trust the output. That is more useful than trying to make the model always right, because no amount of prompt engineering makes that true.
