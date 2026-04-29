@@ -244,8 +244,8 @@ One limitation: tests mock both the Groq client and the `retrieve()` function, s
 
 See [reflection.md](reflection.md) for a full reflection on AI collaboration, design decisions, limitations, ethics, and what building this taught about reliable AI systems.
 
-## Demo Screenshots
-
+## Demo 
+https://www.loom.com/share/fdca869f44b14c1c8f66e5ab9317edf9
 ![Pets and Tasks tab](image.png)
 ![Health Log tab](image1.png)
 ![AI Advisor tab](image2.png)
